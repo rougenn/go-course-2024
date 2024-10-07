@@ -1,23 +1,18 @@
 package main
 
-import "fmt"
-
-type A struct {
-	x int
-	Y int
-}
-
-func newA(x, y int) *A {
-	var Ne = A{
-		x: x,
-		Y: y,
-	}
-	return &Ne
-}
+import (
+	"fmt"
+	"hw1/internal/pkg/storage"
+)
 
 func main() {
-	// fmt.Print("Hellowordl))SDF\n")
+	my_storage := storage.NewStorage()
 
-	a := newA(5123, 10)
-	fmt.Printf("x: %d, Y: %d\n", a.x, a.Y)
+	my_storage.Set("1", "123")
+	my_storage.Set("2", "abcd")
+	fmt.Println(*my_storage.Get("1"))
+	fmt.Println(*my_storage.Get("2"))
+	fmt.Println(my_storage.Get("3"))
+	fmt.Println(*my_storage.GetKind("1"))
+	fmt.Println(*my_storage.GetKind("2"))
 }

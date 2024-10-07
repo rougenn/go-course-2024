@@ -1,3 +1,3 @@
-module golang_course
+module hw1
 
 go 1.23.2

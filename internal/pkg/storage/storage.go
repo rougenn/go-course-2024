@@ -28,7 +28,7 @@ func NewStorage() *Storage {
 	}
 }
 
-func (r Storage) Set(key, input_val string) {
+func (r *Storage) Set(key, input_val string) {
 	defer r.logger.Sync()
 
 	int_val, err := strconv.Atoi(input_val)
@@ -47,7 +47,7 @@ func (r Storage) Set(key, input_val string) {
 	r.logger.Info("key obtained", zap.String("key", key), zap.String("val", input_val), zap.String("type", "string"))
 }
 
-func (r Storage) GetValue(key string) (*Val, bool) {
+func (r *Storage) GetValue(key string) (*Val, bool) {
 	defer r.logger.Sync()
 
 	val, ok := r.inner[key]
@@ -64,7 +64,7 @@ func (r Storage) GetValue(key string) (*Val, bool) {
 	return val, ok
 }
 
-func (r Storage) Get(key string) *string {
+func (r *Storage) Get(key string) *string {
 	defer r.logger.Sync()
 
 	val, ok := r.GetValue(key)
@@ -78,7 +78,7 @@ func (r Storage) Get(key string) *string {
 	return &output
 }
 
-func (r Storage) GetKind(key string) *string {
+func (r *Storage) GetKind(key string) *string {
 	val, ok := r.GetValue(key)
 	if !ok {
 		return nil

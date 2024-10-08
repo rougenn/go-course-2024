@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"go.uber.org/zap"
 	"strconv"
 )
 
@@ -11,32 +12,62 @@ type Val struct {
 }
 
 type Storage struct {
-	inner map[string]*Val
+	inner  map[string]*Val
+	logger *zap.Logger
 }
 
 func NewStorage() *Storage {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	logger.Info("new storage created")
+
 	return &Storage{
-		inner: make(map[string]*Val),
+		inner:  make(map[string]*Val),
+		logger: logger,
 	}
 }
 
 func (r Storage) Set(key, input_val string) {
+	defer r.logger.Sync()
+
 	int_val, err := strconv.Atoi(input_val)
 	if err == nil {
 		r.inner[key] = &Val{
 			kind: "int",
 			n:    int_val,
 		}
+		r.logger.Info("key obtained", zap.String("key", key), zap.Int("val", int_val), zap.String("type", "int"))
 		return
 	}
 	r.inner[key] = &Val{
 		kind: "string",
 		s:    input_val,
 	}
+	r.logger.Info("key obtained", zap.String("key", key), zap.String("val", input_val), zap.String("type", "string"))
+}
+
+func (r Storage) GetValue(key string) (*Val, bool) {
+	defer r.logger.Sync()
+
+	val, ok := r.inner[key]
+	if !ok {
+		r.logger.Info("key value doesnt exists", zap.String("key", key))
+		return nil, ok
+	}
+	if val.kind == "string" {
+		r.logger.Info("storage request", zap.String("key", key), zap.String("val", val.s), zap.String("type", val.kind))
+	} else {
+		r.logger.Info("storage request", zap.String("key", key), zap.Int("val", val.n), zap.String("type", val.kind))
+	}
+
+	return val, ok
 }
 
 func (r Storage) Get(key string) *string {
-	val, ok := r.inner[key]
+	defer r.logger.Sync()
+
+	val, ok := r.GetValue(key)
 	if !ok {
 		return nil
 	}
@@ -48,7 +79,7 @@ func (r Storage) Get(key string) *string {
 }
 
 func (r Storage) GetKind(key string) *string {
-	val, ok := r.inner[key]
+	val, ok := r.GetValue(key)
 	if !ok {
 		return nil
 	}

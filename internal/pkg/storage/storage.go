@@ -5,14 +5,14 @@ import (
 	"strconv"
 )
 
-type Val struct {
+type val struct {
 	kind string
 	s    string
 	n    int
 }
 
 type Storage struct {
-	inner  map[string]*Val
+	inner  map[string]*val
 	logger *zap.Logger
 }
 
@@ -23,7 +23,7 @@ func NewStorage() *Storage {
 	logger.Info("new storage created")
 
 	return &Storage{
-		inner:  make(map[string]*Val),
+		inner:  make(map[string]*val),
 		logger: logger,
 	}
 }
@@ -33,21 +33,21 @@ func (r *Storage) Set(key, input_val string) {
 
 	int_val, err := strconv.Atoi(input_val)
 	if err == nil {
-		r.inner[key] = &Val{
+		r.inner[key] = &val{
 			kind: "int",
 			n:    int_val,
 		}
 		r.logger.Info("key obtained", zap.String("key", key), zap.Int("val", int_val), zap.String("type", "int"))
 		return
 	}
-	r.inner[key] = &Val{
+	r.inner[key] = &val{
 		kind: "string",
 		s:    input_val,
 	}
 	r.logger.Info("key obtained", zap.String("key", key), zap.String("val", input_val), zap.String("type", "string"))
 }
 
-func (r *Storage) GetValue(key string) (*Val, bool) {
+func (r *Storage) GetValue(key string) (*val, bool) {
 	defer r.logger.Sync()
 
 	val, ok := r.inner[key]

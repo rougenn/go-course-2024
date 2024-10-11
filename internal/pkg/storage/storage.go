@@ -27,7 +27,7 @@ type Storage struct {
 }
 
 func NewStorage() *Storage {
-	// to disable logger while benchmarks
+	// to turn off the logger while benchmarks
 	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
 	// logger, _ := zap.NewProduction()
 

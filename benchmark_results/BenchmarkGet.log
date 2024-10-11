@@ -7,10 +7,5 @@ BenchmarkGet/10-16    	 6576946	       186.5 ns/op	     208 B/op	       2 allocs
 BenchmarkGet/100-16   	 6255698	       190.3 ns/op	     208 B/op	       2 allocs/op
 BenchmarkGet/1000-16  	 4870556	       250.5 ns/op	     213 B/op	       3 allocs/op
 BenchmarkGet/10000-16 	 3803904	       338.5 ns/op	     215 B/op	       3 allocs/op
-BenchmarkGetSet/1-16  	 1358515	       787.3 ns/op	     555 B/op	       6 allocs/op
-BenchmarkGetSet/10-16 	 1416164	       787.5 ns/op	     552 B/op	       6 allocs/op
-BenchmarkGetSet/100-16         	 1387502	       800.0 ns/op	     553 B/op	       6 allocs/op
-BenchmarkGetSet/1000-16        	 1267924	       963.5 ns/op	     566 B/op	       7 allocs/op
-BenchmarkGetSet/10000-16       	 1000000	      1058 ns/op	     592 B/op	       8 allocs/op
 PASS
 ok  	hw1/internal/pkg/storage	16.542s

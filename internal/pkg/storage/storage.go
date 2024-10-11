@@ -1,15 +1,25 @@
 package storage
 
 import (
-	"go.uber.org/zap"
 	"strconv"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
+type kind string
+
 type val struct {
-	kind string
-	s    string
-	n    int
+	k kind
+	s string
+	n int
 }
+
+const (
+	KindString    = kind("S")
+	KindInt       = kind("D")
+	KindUndefined = kind("UNDEFINED")
+)
 
 type Storage struct {
 	inner  map[string]*val
@@ -17,8 +27,11 @@ type Storage struct {
 }
 
 func NewStorage() *Storage {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	// to disable logger while benchmarks
+	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
+	// logger, _ := zap.NewProduction()
+
+	// defer logger.Sync()
 
 	logger.Info("new storage created")
 
@@ -29,59 +42,69 @@ func NewStorage() *Storage {
 }
 
 func (r *Storage) Set(key, input_val string) {
-	defer r.logger.Sync()
+	// defer r.logger.Sync()
 
 	int_val, err := strconv.Atoi(input_val)
 	if err == nil {
 		r.inner[key] = &val{
-			kind: "int",
-			n:    int_val,
+			k: KindInt,
+			n: int_val,
 		}
-		r.logger.Info("key obtained", zap.String("key", key), zap.Int("val", int_val), zap.String("type", "int"))
+		r.logger.Info("key obtained", zap.String("key", key),
+			zap.Int("val", int_val), zap.String("type", string(KindInt)))
+
 		return
 	}
 	r.inner[key] = &val{
-		kind: "string",
-		s:    input_val,
+		k: KindString,
+		s: input_val,
 	}
-	r.logger.Info("key obtained", zap.String("key", key), zap.String("val", input_val), zap.String("type", "string"))
+	r.logger.Info("key obtained", zap.String("key", key),
+		zap.String("val", input_val),
+		zap.String("type", string(KindString)))
 }
 
 func (r *Storage) GetValue(key string) (*val, bool) {
-	defer r.logger.Sync()
+	// defer r.logger.Sync()
 
 	val, ok := r.inner[key]
 	if !ok {
 		r.logger.Info("key value doesnt exists", zap.String("key", key))
 		return nil, ok
 	}
-	if val.kind == "string" {
-		r.logger.Info("storage request", zap.String("key", key), zap.String("val", val.s), zap.String("type", val.kind))
+	if val.k == KindString {
+		r.logger.Info("storage request", zap.String("key", key),
+			zap.String("val", val.s), zap.String("type", string(val.k)))
 	} else {
-		r.logger.Info("storage request", zap.String("key", key), zap.Int("val", val.n), zap.String("type", val.kind))
+		r.logger.Info("storage request", zap.String("key", key),
+			zap.Int("val", val.n), zap.String("type", string(val.k)))
 	}
 
 	return val, ok
 }
 
 func (r *Storage) Get(key string) *string {
-	defer r.logger.Sync()
+	// defer r.logger.Sync()
 
 	val, ok := r.GetValue(key)
 	if !ok {
 		return nil
 	}
-	if val.kind == "string" {
+	switch val.k {
+	case KindString:
 		return &val.s
+	case KindInt:
+		output := strconv.Itoa(val.n)
+		return &output
+	default:
+		return nil
 	}
-	output := strconv.Itoa(val.n)
-	return &output
 }
 
-func (r *Storage) GetKind(key string) *string {
+func (r *Storage) GetKind(key string) *kind {
 	val, ok := r.GetValue(key)
 	if !ok {
 		return nil
 	}
-	return &val.kind
+	return &val.k
 }

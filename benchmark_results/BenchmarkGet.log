@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: hw1/internal/pkg/storage
+cpu: AMD Ryzen 7 5700U with Radeon Graphics         
+BenchmarkGet/1-16     	 7449374	       160.6 ns/op	     208 B/op	       2 allocs/op
+BenchmarkGet/10-16    	 6576946	       186.5 ns/op	     208 B/op	       2 allocs/op
+BenchmarkGet/100-16   	 6255698	       190.3 ns/op	     208 B/op	       2 allocs/op
+BenchmarkGet/1000-16  	 4870556	       250.5 ns/op	     213 B/op	       3 allocs/op
+BenchmarkGet/10000-16 	 3803904	       338.5 ns/op	     215 B/op	       3 allocs/op
+PASS
+ok  	hw1/internal/pkg/storage	16.542s

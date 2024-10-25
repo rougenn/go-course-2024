@@ -18,7 +18,7 @@ func main() {
 	store.Set("asdf", "myval", 9)
 	store.Set("domtdelete", 1234, 0)
 	store.Lpush("arr", 23, 12, 32, 43)
-	store.SaveToFile("my-storage.json")
+	// store.SaveToFile("my-storage.json")
 	// time.Sleep(10 * time.Second)
 	// store.Get("asdf")
 	// store.Get("domtdelete")

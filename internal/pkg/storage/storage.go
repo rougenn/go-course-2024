@@ -34,7 +34,10 @@ const (
 )
 
 func newArr() *arrVal {
-
+	return &arrVal{
+		arr:             []int{},
+		expiration_time: 0,
+	}
 }
 
 type Storage struct {
@@ -218,12 +221,12 @@ func (r *Storage) Rpush(key string, arr ...int) {
 		zap.Int("count of elems", len(arr)), zap.String("key", key))
 }
 
-func (r *Storage) Lpush(key string, arr ...int) {
+func (r *Storage) Lpush(key string, input_arr ...int) {
 
-	r.arrays[key].arr = append(arr, r.arrays[key].arr...)
+	r.arrays[key].arr = append(input_arr, r.arrays[key].arr...)
 
 	r.logger.Info("New elems added to LEFT side of slice",
-		zap.Int("count of elems", len(arr)), zap.String("key", key))
+		zap.Int("count of elems", len(input_arr)), zap.String("key", key))
 }
 
 func (r *Storage) Raddtoset(key string, arr ...int) {

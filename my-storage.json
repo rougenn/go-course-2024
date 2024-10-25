@@ -1,1 +1,1 @@
-{"inner":{"asdf":{"value_type":"S","string_value":"myval"},"domtdelete":{"value_type":"D","int_value":1234}},"arrays":{}}
+{"inner":{"asdf":{"value_type":"S","string_value":"myval","int_value":0},"domtdelete":{"value_type":"D","string_value":"","int_value":1234}},"arrays":{"arr":[23,12,32,43]}}

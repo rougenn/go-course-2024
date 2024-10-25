@@ -27,7 +27,7 @@ var cases = []benchCase{
 func BenchmarkSet(b *testing.B) {
 	for in, tCase := range cases {
 		b.Run(strconv.Itoa(in), func(b *testing.B) {
-			s := NewStorage()
+			s, _ := NewStorage(1000, 10000, "test.json")
 
 			for i := 0; i < tCase.cnt; i++ {
 				s.Set(strconv.Itoa(i), strconv.Itoa(i))
@@ -57,7 +57,7 @@ func BenchmarkSet(b *testing.B) {
 func BenchmarkGet(b *testing.B) {
 	for in, tCase := range cases {
 		b.Run(strconv.Itoa(in), func(b *testing.B) {
-			s := NewStorage()
+			s, _ := NewStorage(1000, 10000, "test.json")
 
 			for i := 0; i < tCase.cnt; i++ {
 				s.Set(strconv.Itoa(i), strconv.Itoa(i))
@@ -87,7 +87,7 @@ func BenchmarkGet(b *testing.B) {
 func BenchmarkGetSet(b *testing.B) {
 	for in, tCase := range cases {
 		b.Run(strconv.Itoa(in), func(b *testing.B) {
-			s := NewStorage()
+			s, _ := NewStorage(1000, 10000, "test.json")
 
 			for i := 0; i < tCase.cnt; i++ {
 				s.Set(strconv.Itoa(i), strconv.Itoa(i))
@@ -129,7 +129,7 @@ func TestSetGet(t *testing.T) {
 		{"2", "1", KindInt},
 	}
 
-	s := NewStorage()
+	s, _ := NewStorage(100000, 10000, "test.json")
 
 	for in, c := range cases {
 		t.Run(strconv.Itoa(in), func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestSetGet(t *testing.T) {
 			}
 
 			if sKind != c.kind {
-				t.Errorf("types are not equal: %v, %v", sKind, c.kind)
+				t.Errorf("types are not equal: %v, and expected: %v", sKind, c.kind)
 			}
 		})
 	}

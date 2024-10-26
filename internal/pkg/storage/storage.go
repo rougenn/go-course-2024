@@ -29,7 +29,7 @@ const (
 type Storage struct {
 	inner           map[string]*val  `json:"inner"`
 	arrays          map[string][]int `json:"arrays"`
-	expiration_time map[string]int64 `json:"expiration time"`
+	expiration_time map[string]int64 `json:"expiration time in milliseconds"`
 	logger          *zap.Logger      `json:"-"`
 	cleanDuration   time.Duration    `json:"-`
 	saveDuration    time.Duration    `json:"-`
@@ -58,59 +58,109 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		filename:        filename,
 		expiration_time: make(map[string]int64),
 	}
+	closeGarbageCollector := make(chan struct{})
+	closeStorageSaving := make(chan struct{})
 
-	r.RunGarbageCollector()
-	r.RunStorageSaving()
+	r.RunGarbageCollector(closeGarbageCollector)
+	r.RunStorageSaving(closeStorageSaving)
 
 	return &r, nil
 }
 
-func (r *Storage) RunGarbageCollector() {
-	ticker := time.NewTicker(r.cleanDuration)
+func (r *Storage) RunGarbageCollector(closeChan chan struct{}) {
+	// ticker := time.NewTicker(r.cleanDuration)
 
-	go func() {
-		for range ticker.C {
+	// go func() {
+	// 	for range ticker.C {
+	// r.logger.Info("garbage collector is running")
+	// r.GarbageCollect()
+	// 	}
+	// }()
+
+	for {
+		select {
+		case <-closeChan:
+			return
+		case <-time.After(r.cleanDuration):
 			r.logger.Info("garbage collector is running")
 			r.GarbageCollect()
 		}
-	}()
+	}
+}
+
+func (r *Storage) CheckArrKey(key string) error {
+	curTime := time.Now().UnixMilli()
+	_, exists := r.arrays[key]
+
+	if !exists {
+		return ErrKeyDoesntExist
+	}
+
+	if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
+		delete(r.arrays, key)
+		delete(r.expiration_time, key)
+
+		return ErrKeyDoesntExist
+	}
+	return nil
 }
 
 func (r *Storage) GarbageCollect() {
-	curTime := time.Now().Unix()
+	curTime := time.Now().UnixMilli()
 	for key := range r.inner {
 		if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
 			delete(r.inner, key)
+			delete(r.expiration_time, key)
 			r.logger.Info("deleted expired key", zap.String("key", key))
 		}
 	}
 	for key := range r.arrays {
 		if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
 			delete(r.arrays, key)
+			delete(r.expiration_time, key)
 			r.logger.Info("deleted expired key", zap.String("key", key))
 		}
 	}
 }
 
-func (r *Storage) RunStorageSaving() {
-	ticker := time.NewTicker(r.saveDuration)
+func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
+	// ticker := time.NewTicker(r.saveDuration)
 
-	go func() {
-		for range ticker.C {
+	// go func() {
+	// 	for range ticker.C {
+	// 		r.SaveToFile(r.filename)
+	// 	}
+	// }()
+
+	for {
+		select {
+		case <-closeChan:
+			return
+		case <-time.After(r.cleanDuration):
+			r.logger.Info("saving storage", zap.String("filename", r.filename))
 			r.SaveToFile(r.filename)
 		}
-	}()
+	}
 }
 
-// Set устанавливает значение по указанному ключу с опциональным временем истечения.
-// Время истечения указывается в секундах. Например, для установки времени истечения на 5 минут,
-// передайте 300 (5 минут * 60 секунд).
+func (r *Storage) Hset(args ...string) error {
+	if len(args)%2 != 0 {
+		return ErrIncorrectArgs
+	}
+	for i := 0; i < len(args); i += 2 {
+		if err := r.Set(args[i], args[i+1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64) error {
 	t := int64(0)
 	switch len(expiration_seconds) {
 	case 1:
 		if expiration_seconds[0] > 0 {
-			t = expiration_seconds[0] + time.Now().Unix()
+			t = time.Now().Add(time.Duration(expiration_seconds[0]) * time.Second).UnixMilli()
 		}
 		if expiration_seconds[0] < 0 {
 			return ErrIncorrectArgs
@@ -165,7 +215,14 @@ func (r *Storage) GetValue(key string) (*val, error) {
 	curTime := time.Now().Unix()
 	val, ok := r.inner[key]
 
-	if !ok || (r.expiration_time[key] != 0 && r.expiration_time[key] < curTime) {
+	if !ok {
+		r.logger.Info("key value doesnt exist", zap.String("key", key))
+		return nil, ErrKeyDoesntExist
+	}
+
+	if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
+		delete(r.inner, key)
+		delete(r.expiration_time, key)
 		r.logger.Info("key value doesnt exist", zap.String("key", key))
 		return nil, ErrKeyDoesntExist
 	}
@@ -208,10 +265,10 @@ func (r *Storage) GetKind(key string) (kind, error) {
 }
 
 func (r *Storage) Rpush(key string, arr ...int) {
-	_, exists := r.arrays[key]
-	if !exists {
+	if err := r.CheckArrKey(key); err != nil {
 		r.expiration_time[key] = 0
 	}
+
 	r.arrays[key] = append(r.arrays[key], arr...)
 
 	r.logger.Info("New elems added to RIGHT side of slice",
@@ -219,17 +276,21 @@ func (r *Storage) Rpush(key string, arr ...int) {
 }
 
 func (r *Storage) Lpush(key string, input_arr ...int) {
-	_, exists := r.arrays[key]
-	if !exists {
+	if err := r.CheckArrKey(key); err != nil {
 		r.expiration_time[key] = 0
 	}
+
 	r.arrays[key] = append(input_arr, r.arrays[key]...)
 
 	r.logger.Info("New elems added to LEFT side of slice",
 		zap.Int("count of elems", len(input_arr)), zap.String("key", key))
 }
 
-func (r *Storage) Raddtoset(key string, arr ...int) {
+func (r *Storage) Raddtoset(key string, arr ...int) error {
+
+	if err := r.CheckArrKey(key); err != nil {
+		return err
+	}
 
 	for _, elem := range arr {
 		exists := false
@@ -248,9 +309,15 @@ func (r *Storage) Raddtoset(key string, arr ...int) {
 		}
 	}
 	r.logger.Info("New elements added", zap.String("key", key))
+	return nil
 }
 
 func (r *Storage) DeleteSegment(key string, l int, ri int) ([]int, error) {
+
+	if err := r.CheckArrKey(key); err != nil {
+		return []int{}, err
+	}
+
 	leng := len(r.arrays[key])
 
 	if leng == 0 {
@@ -283,9 +350,8 @@ func (r *Storage) DeleteSegment(key string, l int, ri int) ([]int, error) {
 }
 
 func (r *Storage) Lpop(key string, args ...int) ([]int, error) {
-	_, ok := r.arrays[key]
-	if !ok {
-		return []int{}, ErrKeyDoesntExist
+	if err := r.CheckArrKey(key); err != nil {
+		return []int{}, err
 	}
 
 	length := len(r.arrays[key])
@@ -325,10 +391,10 @@ func (r *Storage) Lpop(key string, args ...int) ([]int, error) {
 }
 
 func (r *Storage) Rpop(key string, args ...int) ([]int, error) {
-	_, ok := r.arrays[key]
-	if !ok {
-		return []int{}, ErrKeyDoesntExist
+	if err := r.CheckArrKey(key); err != nil {
+		return []int{}, err
 	}
+
 	length := len(r.arrays[key])
 	switch le := len(args); le {
 	case 0:
@@ -394,6 +460,7 @@ func (r *Storage) Lget(key string, index int) (int, error) {
 		r.logger.Error(ErrKeyDoesntExist.Error())
 		return 0, ErrKeyDoesntExist
 	}
+
 	if index >= len(arr) {
 		r.logger.Error(ErrIndexOutOfRange.Error())
 		return 0, ErrIndexOutOfRange
@@ -461,10 +528,6 @@ func (r *Storage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (r *Storage) Save() error {
-	return r.SaveToFile(r.filename)
-}
-
 func (r *Storage) SaveToFile(filename string) error {
 	data, err := json.Marshal(r)
 	if err != nil {
@@ -497,13 +560,13 @@ func (r *Storage) LoadFromFile(filename string) error {
 
 // ex = expiration time in seconds
 func (r *Storage) Expire(key string, ex int64) bool {
-	currentTime := time.Now().Unix()
+	currentTime := time.Now().UnixMilli()
 	if _, exists := r.inner[key]; exists &&
 		(r.expiration_time[key] == 0 ||
 			r.expiration_time[key] > currentTime) {
 
 		if ex != 0 {
-			r.expiration_time[key] = currentTime + ex
+			r.expiration_time[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
 		} else {
 			r.expiration_time[key] = 0
 		}
@@ -515,11 +578,10 @@ func (r *Storage) Expire(key string, ex int64) bool {
 			r.expiration_time[key] > currentTime) {
 
 		if ex != 0 {
-			r.expiration_time[key] = currentTime + ex
+			r.expiration_time[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
 		} else {
 			r.expiration_time[key] = 0
 		}
-		return true
 	}
 
 	return false

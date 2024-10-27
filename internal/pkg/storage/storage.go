@@ -61,8 +61,8 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 	closeGarbageCollector := make(chan struct{})
 	closeStorageSaving := make(chan struct{})
 
-	r.RunGarbageCollector(closeGarbageCollector)
-	r.RunStorageSaving(closeStorageSaving)
+	go r.RunGarbageCollector(closeGarbageCollector)
+	go r.RunStorageSaving(closeStorageSaving)
 
 	return &r, nil
 }

@@ -9,19 +9,13 @@ import (
 )
 
 func main() {
-	s, err := storage.NewStorage(time.Second*20, time.Second*10, "my-storage.json")
+	store, err := storage.NewStorage(time.Minute*20, time.Minute*60, "my-storage.json")
 	if err != nil {
-		log.Fatalf("Error initializing storage: %v", err)
+		log.Fatalf("Failed to create storage: %v", err)
 	}
+	fmt.Println("Storage created successfully")
 
-	err = s.LoadFromFile("my-storage.json")
-	if err != nil {
-		log.Printf("Warning: Could not load data from file - %v", err)
-	}
-
-	ser := server.New("localhost:4000", s)
-
-	fmt.Println("Starting server on localhost:8090")
-	ser.Start()
-
+	s := server.New(":8090", store)
+	fmt.Println("Starting server on :8090...")
+	s.Start()
 }

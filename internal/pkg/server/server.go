@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"hw1/internal/pkg/storage"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -22,6 +24,7 @@ func New(host string, st *storage.Storage) *Server {
 		host:    host,
 		storage: st,
 	}
+
 	return s
 }
 
@@ -30,6 +33,10 @@ func (r *Server) newAPI() *gin.Engine {
 
 	engine.GET("/hello-world", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, "Hello world")
+	})
+
+	engine.GET("/health", func(ctx *gin.Context) {
+		ctx.Status(http.StatusOK)
 	})
 
 	engine.PUT("/scalar/set/:key", r.handlerSet)
@@ -46,37 +53,36 @@ func (r *Server) newAPI() *gin.Engine {
 	engine.GET("/lget/:key/:index", r.handlerLget)
 	engine.PUT("/expire/:key/:seconds", r.handlerExpire)
 
-	engine.GET("/health", func(ctx *gin.Context) {
-		ctx.Status(http.StatusOK)
-	})
-
 	return engine
 }
 
 func (r *Server) handlerSet(ctx *gin.Context) {
 	key := ctx.Param("key")
+
 	var v Entry
 
-	if err := ctx.BindJSON(&v); err != nil {
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&v); err != nil {
 		ctx.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	if err := r.storage.Set(key, v.Value); err != nil {
-		ctx.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+	r.storage.Set(key, v.Value)
+
 	ctx.Status(http.StatusOK)
 }
 
 func (r *Server) handlerGet(ctx *gin.Context) {
 	key := ctx.Param("key")
+
 	v, err := r.storage.Get(key)
 	if err != nil {
 		ctx.AbortWithStatus(http.StatusNotFound)
-		return
 	}
-	ctx.JSON(http.StatusOK, Entry{Value: v})
+
+	ctx.JSON(http.StatusOK, Entry{
+		Value: v,
+	})
+
 }
 
 func (r *Server) handlerHset(ctx *gin.Context) {
@@ -209,5 +215,8 @@ func (r *Server) handlerExpire(ctx *gin.Context) {
 }
 
 func (r *Server) Start() {
-	r.newAPI().Run(r.host)
+	err := r.newAPI().Run(r.host)
+	if err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

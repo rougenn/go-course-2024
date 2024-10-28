@@ -58,34 +58,11 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		filename:        filename,
 		expiration_time: make(map[string]int64),
 	}
-	closeGarbageCollector := make(chan struct{})
 	closeStorageSaving := make(chan struct{})
 
-	go r.RunGarbageCollector(closeGarbageCollector)
 	go r.RunStorageSaving(closeStorageSaving)
 
 	return &r, nil
-}
-
-func (r *Storage) RunGarbageCollector(closeChan chan struct{}) {
-	// ticker := time.NewTicker(r.cleanDuration)
-
-	// go func() {
-	// 	for range ticker.C {
-	// r.logger.Info("garbage collector is running")
-	// r.GarbageCollect()
-	// 	}
-	// }()
-
-	for {
-		select {
-		case <-closeChan:
-			return
-		case <-time.After(r.cleanDuration):
-			r.logger.Info("garbage collector is running")
-			r.GarbageCollect()
-		}
-	}
 }
 
 func (r *Storage) CheckArrKey(key string) error {
@@ -105,32 +82,7 @@ func (r *Storage) CheckArrKey(key string) error {
 	return nil
 }
 
-func (r *Storage) GarbageCollect() {
-	curTime := time.Now().UnixMilli()
-	for key := range r.inner {
-		if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
-			delete(r.inner, key)
-			delete(r.expiration_time, key)
-			r.logger.Info("deleted expired key", zap.String("key", key))
-		}
-	}
-	for key := range r.arrays {
-		if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
-			delete(r.arrays, key)
-			delete(r.expiration_time, key)
-			r.logger.Info("deleted expired key", zap.String("key", key))
-		}
-	}
-}
-
 func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
-	// ticker := time.NewTicker(r.saveDuration)
-
-	// go func() {
-	// 	for range ticker.C {
-	// 		r.SaveToFile(r.filename)
-	// 	}
-	// }()
 
 	for {
 		select {

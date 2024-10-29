@@ -156,6 +156,7 @@ func TestSetGet(t *testing.T) {
 			}
 		})
 	}
+	s.Wait()
 }
 
 func TestGarbageCollect(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -40,11 +41,12 @@ type Storage struct {
 	arrays                map[string][]int `json:"arrays"`
 	expiration_time       map[string]int64 `json:"expiration time in milliseconds"`
 	logger                *zap.Logger      `json:"-"`
-	cleanDuration         time.Duration    `json:"-`
-	saveDuration          time.Duration    `json:"-`
-	filename              string           `json:"-`
-	closeStorageSaving    chan struct{}    `json:"-`
-	closeGarbageCollector chan struct{}    `json:"-`
+	cleanDuration         time.Duration    `json:"-"`
+	saveDuration          time.Duration    `json:"-"`
+	filename              string           `json:"-"`
+	closeStorageSaving    chan struct{}    `json:"-"`
+	closeGarbageCollector chan struct{}    `json:"-"`
+	wg                    *sync.WaitGroup  `json:"-"`
 }
 
 // Func creates a new storage with saving and cleaning duration time is seconds.
@@ -55,11 +57,10 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 
 	logger, _ := zap.NewProduction()
 
-	// defer logger.Sync()
-
 	logger.Info("new storage created", zap.Int64("clean duration", int64(cleanDuration)),
 		zap.Int64("save duration", int64(saveDuration)))
 
+	var wg sync.WaitGroup
 	r := Storage{
 		inner:                 make(map[string]*val),
 		logger:                logger,
@@ -70,6 +71,7 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		expiration_time:       make(map[string]int64),
 		closeGarbageCollector: make(chan struct{}),
 		closeStorageSaving:    make(chan struct{}),
+		wg:                    &wg,
 	}
 
 	go r.RunGarbageCollector(r.closeGarbageCollector)
@@ -84,12 +86,19 @@ func (r *Storage) RunGarbageCollector(closeChan chan struct{}) {
 		case <-closeChan:
 			return
 		case <-time.After(r.cleanDuration):
+			r.wg.Add(1)
 			r.GarbageCollect()
 		}
 	}
 }
 
+func (r *Storage) Wait() {
+	r.wg.Wait()
+}
+
 func (r *Storage) GarbageCollect() {
+	defer r.wg.Done()
+
 	r.logger.Info("garbage collection started")
 
 	curTime := time.Now().UnixMilli()
@@ -160,6 +169,7 @@ func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
 			return
 		case <-time.After(r.cleanDuration):
 			r.logger.Info("saving storage", zap.String("filename", r.filename))
+			r.wg.Add(1)
 			r.SaveToFile(r.filename)
 		}
 	}
@@ -224,7 +234,6 @@ func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64)
 }
 
 func (r *Storage) GetValue(key string) (*val, error) {
-	// defer r.logger.Sync()
 	curTime := time.Now().UnixMilli()
 	val, ok := r.inner[key]
 
@@ -542,6 +551,8 @@ func (r *Storage) UnmarshalJSON(data []byte) error {
 }
 
 func (r *Storage) SaveToFile(filename string) error {
+	defer r.wg.Done()
+
 	data, err := json.Marshal(r)
 	if err != nil {
 		return fmt.Errorf("error marshalling storage: %v", err)

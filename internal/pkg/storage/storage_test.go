@@ -2,8 +2,12 @@ package storage
 
 import (
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type testCase struct {
@@ -152,4 +156,61 @@ func TestSetGet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGarbageCollect(t *testing.T) {
+	r, err := NewStorage(time.Minute*20, time.Minute*60, "test.json")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer os.Remove("test.json")
+
+	r.Set("key1", "value1", 1)
+	r.Set("key2", "value2", 12345)
+	r.Set("key3", "1234", 1)
+	time.Sleep(2 * time.Second)
+	r.GarbageCollect()
+
+	_, err1 := r.Get("key1")
+	_, err2 := r.Get("key2")
+	_, err3 := r.Get("key3")
+
+	assert.False(t, err1 == nil, "key1 должен быть удален")
+	assert.True(t, err2 == nil, "key2 должен оставаться")
+	assert.False(t, err3 == nil, "key3 должен быть удален")
+}
+
+func TestDatabaseSaveAndLoadWithGarbageCollector(t *testing.T) {
+	r, err := NewStorage(time.Minute*20, time.Minute*60, "my-storage.json")
+	defer os.Remove("my-storage.json")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r.Set("key1", "value1", 2)
+	r.Set("key2", "value2", 5)
+	r.Set("key3", "value3", 10)
+
+	r.SaveToFile("my-storage.json")
+
+	r2, err := NewStorage(15*time.Minute, 1*time.Minute, "my-storage.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.LoadFromFile("my-storage.json")
+
+	time.Sleep(6 * time.Second)
+
+	r2.GarbageCollect()
+
+	_, err1 := r2.Get("key1")
+	_, err2 := r2.Get("key2")
+	_, err3 := r2.Get("key3")
+
+	assert.False(t, err1 == nil, "key1 должен быть удален после garbage collection")
+	assert.False(t, err2 == nil, "key2 должен быть удален после garbage collection")
+	assert.True(t, err3 == nil, "key3 должен оставаться")
 }

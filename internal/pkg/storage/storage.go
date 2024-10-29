@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/exp/rand"
 )
 
 type kind string
@@ -26,18 +27,28 @@ const (
 	KindUndefined = kind("UNDEFINED")
 )
 
+var (
+	ErrKeyDoesntExist       = errors.New("key value doesnt exist")
+	ErrIndexOutOfRange      = errors.New("index is out of range")
+	ErrKeyAlreadyExists     = errors.New("key already exists")
+	ErrIncorrectArgs        = errors.New("function got incorrect arguments")
+	ErrUnsupportedValueType = errors.New("unsupported value type")
+)
+
 type Storage struct {
-	inner           map[string]*val  `json:"inner"`
-	arrays          map[string][]int `json:"arrays"`
-	expiration_time map[string]int64 `json:"expiration time in milliseconds"`
-	logger          *zap.Logger      `json:"-"`
-	cleanDuration   time.Duration    `json:"-`
-	saveDuration    time.Duration    `json:"-`
-	filename        string           `json:"-`
+	inner                 map[string]*val  `json:"inner"`
+	arrays                map[string][]int `json:"arrays"`
+	expiration_time       map[string]int64 `json:"expiration time in milliseconds"`
+	logger                *zap.Logger      `json:"-"`
+	cleanDuration         time.Duration    `json:"-`
+	saveDuration          time.Duration    `json:"-`
+	filename              string           `json:"-`
+	closeStorageSaving    chan struct{}    `json:"-`
+	closeGarbageCollector chan struct{}    `json:"-`
 }
 
 // Func creates a new storage with saving and cleaning duration time is seconds.
-// It saves current version of storage to file.json every (cleanDuration) seconds
+// It saves current version of storage to filename.json every {cleanDuration} seconds
 func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*Storage, error) {
 	// to turn off the logger while benchmarks
 	// logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
@@ -50,19 +61,78 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		zap.Int64("save duration", int64(saveDuration)))
 
 	r := Storage{
-		inner:           make(map[string]*val),
-		logger:          logger,
-		arrays:          make(map[string][]int),
-		cleanDuration:   cleanDuration,
-		saveDuration:    saveDuration,
-		filename:        filename,
-		expiration_time: make(map[string]int64),
+		inner:                 make(map[string]*val),
+		logger:                logger,
+		arrays:                make(map[string][]int),
+		cleanDuration:         cleanDuration,
+		saveDuration:          saveDuration,
+		filename:              filename,
+		expiration_time:       make(map[string]int64),
+		closeGarbageCollector: make(chan struct{}),
+		closeStorageSaving:    make(chan struct{}),
 	}
-	closeStorageSaving := make(chan struct{})
 
-	go r.RunStorageSaving(closeStorageSaving)
+	go r.RunGarbageCollector(r.closeGarbageCollector)
+	go r.RunStorageSaving(r.closeStorageSaving)
 
 	return &r, nil
+}
+
+func (r *Storage) RunGarbageCollector(closeChan chan struct{}) {
+	for {
+		select {
+		case <-closeChan:
+			return
+		case <-time.After(r.cleanDuration):
+			r.GarbageCollect()
+		}
+	}
+}
+
+func (r *Storage) GarbageCollect() {
+	r.logger.Info("garbage collection started")
+
+	curTime := time.Now().UnixMilli()
+	expirationKeys := r.getRandomKeysWithExpiration(min(10, len(r.expiration_time)/5))
+
+	for _, key := range expirationKeys {
+		if expTime, exists := r.expiration_time[key]; exists && expTime != 0 && expTime < curTime {
+			r.deleteKey(key)
+		}
+	}
+}
+
+func (r *Storage) getRandomKeysWithExpiration(count int) []string {
+	keys := make([]string, 0, len(r.expiration_time))
+	for key := range r.expiration_time {
+		keys = append(keys, key)
+	}
+
+	if len(keys) <= count {
+		return keys
+	}
+
+	randomKeys := make([]string, count)
+	for i := 0; i < count; i++ {
+		randomIndex := rand.Intn(len(keys))
+		randomKeys[i] = keys[randomIndex]
+		keys = append(keys[:randomIndex], keys[randomIndex+1:]...)
+	}
+
+	return randomKeys
+}
+
+func (r *Storage) deleteKey(key string) {
+	if _, exists := r.inner[key]; exists {
+		delete(r.inner, key)
+		r.logger.Info("Deleted expired key from inner", zap.String("key", key))
+	}
+	if _, exists := r.arrays[key]; exists {
+		delete(r.arrays, key)
+		r.logger.Info("Deleted expired key from arrays", zap.String("key", key))
+	}
+	delete(r.expiration_time, key)
+	r.logger.Info("Deleted expiration entry for key", zap.String("key", key))
 }
 
 func (r *Storage) CheckArrKey(key string) error {
@@ -124,7 +194,6 @@ func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64)
 		return ErrIncorrectArgs
 	}
 
-	// defer r.logger.Sync()
 	if _, exists := r.arrays[key]; exists {
 		r.logger.Error("по данному ключу существует значение другого типа")
 		return ErrKeyAlreadyExists
@@ -154,17 +223,9 @@ func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64)
 	return nil
 }
 
-var (
-	ErrKeyDoesntExist       = errors.New("key value doesnt exist")
-	ErrIndexOutOfRange      = errors.New("index is out of range")
-	ErrKeyAlreadyExists     = errors.New("key already exists")
-	ErrIncorrectArgs        = errors.New("function got incorrect arguments")
-	ErrUnsupportedValueType = errors.New("unsupported value type")
-)
-
 func (r *Storage) GetValue(key string) (*val, error) {
 	// defer r.logger.Sync()
-	curTime := time.Now().Unix()
+	curTime := time.Now().UnixMilli()
 	val, ok := r.inner[key]
 
 	if !ok {

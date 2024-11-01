@@ -162,13 +162,11 @@ func (r *Storage) CheckArrKey(key string) error {
 }
 
 func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
-
 	for {
 		select {
 		case <-closeChan:
 			return
-		case <-time.After(r.cleanDuration):
-			r.logger.Info("saving storage", zap.String("filename", r.filename))
+		case <-time.After(r.saveDuration):
 			r.wg.Add(1)
 			r.SaveToFile(r.filename)
 		}

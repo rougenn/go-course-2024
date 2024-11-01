@@ -1,0 +1,15 @@
+FROM golang:1.23 AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN ls -la # проверка наличия go.mod и go.sum
+RUN go mod download
+
+COPY . .
+RUN ls -la /app # проверка после копирования всех файлов
+
+RUN --mount=type=cache,target="/root/.cache/go-build" go build -o /app/main ./cmd/main.go
+RUN ls -la /app # проверка наличия /app/main после сборки
+
+CMD ["/app/main"]

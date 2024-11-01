@@ -1,0 +1,15 @@
+services:
+  basic_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    image: basic_server:0.0.1
+    container_name: docker-server
+    environment:
+      - SAVE_DURATION=300
+      - CLEAR_DURATION=120
+      - SERVER_PORT=8090
+      - STORAGE_FILENAME=mystorage.json
+    ports:
+      - "8090:8090"
+    restart: always  # Добавьте эту строку для автоматического перезапуска

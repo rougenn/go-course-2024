@@ -16,10 +16,16 @@ func main() {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
 
+	if err := store.LoadFromFile(filename); err != nil {
+		fmt.Println("Failed to load storage")
+	} else {
+		fmt.Println("storage loaded successfully", filename)
+	}
+
 	fmt.Println("Storage created successfully")
 
 	s := server.New(port, store)
-	fmt.Println("Starting server on :8090...")
+	fmt.Println("Starting server on " + port)
 	s.Start()
 
 	store.Wait()

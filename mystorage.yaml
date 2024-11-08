@@ -2,6 +2,9 @@ version: '3.8'
 
 services:
   basic_server:
+    depends_on:
+      postgres:
+        condition: service_healthy
     build:
       context: .
       dockerfile: Dockerfile.storage
@@ -17,5 +20,22 @@ services:
     volumes:
       - storage_data:/app/data
 
+  postgres:
+    image: postgres:13.3
+    environment:
+      POSTGRES_DB: "storagedb"
+      POSTGRES_USER: "username"
+      POSTGRES_PASSWORD: "password"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d storagedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   storage_data:  
+  postgres:

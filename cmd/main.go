@@ -1,43 +1,26 @@
 package main
 
 import (
-	// "hw1/internal/pkg/server"
-	"fmt"
 	"hw1/internal/pkg/storage"
+	"time"
 )
 
 func main() {
-	// store, err = server.New("/8080")
+	store, _ := storage.NewStorage(time.Second*5, time.Second*60, "my-storage.json")
+	// s := server.New("localhost:8090", store)
 
-	s := storage.NewStorage()
-	s.LoadFromFile("ex.json")
-	// example 1
-	// s.Rpush("list1", 1, 2, 3)
-	fmt.Println(s.Lpop("list1", 0, -1))
-	// fmt.Println(s.Lpop("list1", 0, 1))
+	// s.Start()
+	// s := storage.NewStorage()
+	// s.LoadFromFile("storage.json")
+	// fmt.Println(s.Get("abcd"))
+	// s.SaveToFile("storage.json")
 
-	// example 2
-	// s.Rpush("list1", 1, 2, 3)
-	// s.Raddtoset("list1", 3, 5, 8, 4, 8)
-	// fmt.Println(s.Lpop("list1", 0, -1))
+	store.Set("asdf", "myval", 9)
+	store.Set("domtdelete", 1234, 0)
+	store.Lpush("arr", 23, 12, 32, 43)
+	// store.SaveToFile("my-storage.json")
+	// time.Sleep(10 * time.Second)
+	// store.Get("asdf")
+	// store.Get("domtdelete")
 
-	// example 3
-	// s.Rpush("list1", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-	// fmt.Println(s.Lpop("list1", 2))
-	// fmt.Println(s.Lpop("list1", 2, -2))
-	// fmt.Println(s.Lpop("list1"))
-
-	// example 4
-	// s.Rpush("list2", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-	// fmt.Println(s.Rpop("list1", 2))
-	// fmt.Println(s.Rpop("list1", 2, -2))
-	// fmt.Println(s.Rpop("list1"))
-
-	// example 5
-	// s.Rpush("list3", 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
-	// fmt.Println(s.Lset("list1", 3, 30))
-	// fmt.Println(s.Lget("list1", 3))
-	// fmt.Println(s.Lset("list1", 20, 2))
-
-	s.SaveToFile("ex.json")
 }

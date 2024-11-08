@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"hw1/internal/pkg/storage"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -33,13 +34,12 @@ func (r *Server) newAPI() *gin.Engine {
 		ctx.JSON(http.StatusOK, "Hello world")
 	})
 
-	engine.PUT("/scalar/set/:key", r.handlerSet)
-
-	engine.GET("/scalar/get/:key", r.handlerGet)
-
 	engine.GET("/health", func(ctx *gin.Context) {
 		ctx.Status(http.StatusOK)
 	})
+
+	engine.PUT("/scalar/set/:key", r.handlerSet)
+	engine.GET("/scalar/get/:key", r.handlerGet)
 
 	return engine
 }
@@ -74,5 +74,8 @@ func (r *Server) handlerGet(ctx *gin.Context) {
 }
 
 func (r *Server) Start() {
-	r.newAPI().Run(r.host)
+	err := r.newAPI().Run(r.host)
+	if err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

@@ -1,26 +1,21 @@
 package main
 
 import (
+	"fmt"
+	"hw1/internal/pkg/server"
 	"hw1/internal/pkg/storage"
+	"log"
 	"time"
 )
 
 func main() {
-	store, _ := storage.NewStorage(time.Second*5, time.Second*60, "my-storage.json")
-	// s := server.New("localhost:8090", store)
+	store, err := storage.NewStorage(time.Minute*20, time.Minute*60, "my-storage.json")
+	if err != nil {
+		log.Fatalf("Failed to create storage: %v", err)
+	}
+	fmt.Println("Storage created successfully")
 
-	// s.Start()
-	// s := storage.NewStorage()
-	// s.LoadFromFile("storage.json")
-	// fmt.Println(s.Get("abcd"))
-	// s.SaveToFile("storage.json")
-
-	store.Set("asdf", "myval", 9)
-	store.Set("domtdelete", 1234, 0)
-	store.Lpush("arr", 23, 12, 32, 43)
-	// store.SaveToFile("my-storage.json")
-	// time.Sleep(10 * time.Second)
-	// store.Get("asdf")
-	// store.Get("domtdelete")
-
+	s := server.New(":8090", store)
+	fmt.Println("Starting server on :8090...")
+	s.Start()
 }

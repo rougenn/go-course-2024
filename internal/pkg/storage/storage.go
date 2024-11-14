@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -74,8 +75,8 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		wg:                    &wg,
 	}
 
-	go r.RunGarbageCollector(r.closeGarbageCollector)
 	go r.RunStorageSaving(r.closeStorageSaving)
+	go r.RunGarbageCollector(r.closeGarbageCollector)
 
 	return &r, nil
 }
@@ -162,13 +163,11 @@ func (r *Storage) CheckArrKey(key string) error {
 }
 
 func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
-
 	for {
 		select {
 		case <-closeChan:
 			return
-		case <-time.After(r.cleanDuration):
-			r.logger.Info("saving storage", zap.String("filename", r.filename))
+		case <-time.After(r.saveDuration):
 			r.wg.Add(1)
 			r.SaveToFile(r.filename)
 		}
@@ -551,19 +550,24 @@ func (r *Storage) UnmarshalJSON(data []byte) error {
 }
 
 func (r *Storage) SaveToFile(filename string) error {
+
 	defer r.wg.Done()
 
 	data, err := json.Marshal(r)
 	if err != nil {
+		fmt.Println("error marshalling storage: ", err)
 		return fmt.Errorf("error marshalling storage: %v", err)
 	}
 
-	temp := "temp_" + filename
+	temp := filepath.Join(filepath.Dir(filename), "storage_temp.json")
+
 	if err := ioutil.WriteFile(temp, data, 0666); err != nil {
+		fmt.Println("error writing to file: ", err)
 		return fmt.Errorf("error writing to file: %v", err)
 	}
 
 	if err := os.Rename(temp, r.filename); err != nil {
+		fmt.Println("error writing to file: ", err)
 		return fmt.Errorf("error writing to file: %v", err)
 	}
 	r.logger.Info("Storage saved to file", zap.String("filename", filename))

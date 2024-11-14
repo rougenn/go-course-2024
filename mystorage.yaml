@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  basic_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    image: basic_server:0.0.1
+    container_name: docker-server
+    environment:
+      - SAVE_DURATION=10
+      - CLEAR_DURATION=100
+      - SERVER_PORT=8090
+      - STORAGE_FILENAME=/app/data/mystorage.json
+    ports:
+      - "8090:8090"
+    volumes:
+      - storage_data:/app/data
+
+volumes:
+  storage_data:  

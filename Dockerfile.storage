@@ -7,10 +7,14 @@ RUN go mod download
 
 COPY . .
 
-RUN --mount=type=cache,target="/root/.cache/go-build" go build -o /app/main ./cmd/main.go
+RUN go build -o /app/main ./cmd/main.go
 
 RUN mkdir -p /app/storage \
     && touch /app/storage/mystorage.json \
     && chmod -R 777 /app/storage
+
+# debug
+# RUN cat /app/cmd/mai?n.go,
+# RUN ls -lh /app/main
 
 CMD ["/app/main"]

@@ -65,12 +65,12 @@ func (r *Server) handlerGet(ctx *gin.Context) {
 	v, err := r.storage.Get(key)
 	if err != nil {
 		ctx.AbortWithStatus(http.StatusNotFound)
+		return
 	}
 
 	ctx.JSON(http.StatusOK, Entry{
 		Value: v,
 	})
-
 }
 
 func (r *Server) Start() {

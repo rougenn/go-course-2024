@@ -1,10 +1,12 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,9 +20,9 @@ import (
 type kind string
 
 type val struct {
-	value_type   kind
-	string_value string
-	int_value    int
+	valueType   kind
+	stringValue string
+	intValue    int
 }
 
 const (
@@ -40,7 +42,7 @@ var (
 type Storage struct {
 	inner                 map[string]*val  `json:"inner"`
 	arrays                map[string][]int `json:"arrays"`
-	expiration_time       map[string]int64 `json:"expiration time in milliseconds"`
+	expirationTime        map[string]int64 `json:"expiration_time_in_milliseconds"`
 	logger                *zap.Logger      `json:"-"`
 	cleanDuration         time.Duration    `json:"-"`
 	saveDuration          time.Duration    `json:"-"`
@@ -48,7 +50,17 @@ type Storage struct {
 	closeStorageSaving    chan struct{}    `json:"-"`
 	closeGarbageCollector chan struct{}    `json:"-"`
 	wg                    *sync.WaitGroup  `json:"-"`
+	mu                    *sync.Mutex      `json:"-"`
+	db                    *sql.DB
 }
+
+const (
+	CreateTable = `CREATE TABLE IF NOT EXISTS core (
+		version bigserial PRIMARY KEY,
+		timestamp bigint NOT NULL,
+		payload JSONB NOT NULL
+	)`
+)
 
 // Func creates a new storage with saving and cleaning duration time is seconds.
 // It saves current version of storage to filename.json every {cleanDuration} seconds
@@ -61,6 +73,23 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 	logger.Info("new storage created", zap.Int64("clean duration", int64(cleanDuration)),
 		zap.Int64("save duration", int64(saveDuration)))
 
+	fmt.Println("Attempting to connect to PostgreSQL")
+	db, err := sql.Open("postgres", "postgres://username:password@postgres:5432/storagedb?sslmode=disable")
+
+	if err != nil {
+		log.Fatal("connection:", err)
+	}
+	fmt.Println("Connected to PostgreSQL, pinging...")
+	if err := db.Ping(); err != nil {
+		log.Fatal("ping: ", err)
+	}
+	fmt.Println("Connected to PostgreSQL")
+
+	// Создание таблицы при необходимости
+	if _, err := db.Exec(CreateTable); err != nil {
+		log.Fatalf("Error creating table: %v", err)
+	}
+
 	var wg sync.WaitGroup
 	r := Storage{
 		inner:                 make(map[string]*val),
@@ -69,10 +98,12 @@ func NewStorage(saveDuration, cleanDuration time.Duration, filename string) (*St
 		cleanDuration:         cleanDuration,
 		saveDuration:          saveDuration,
 		filename:              filename,
-		expiration_time:       make(map[string]int64),
+		expirationTime:        make(map[string]int64),
 		closeGarbageCollector: make(chan struct{}),
 		closeStorageSaving:    make(chan struct{}),
 		wg:                    &wg,
+		mu:                    &sync.Mutex{},
+		db:                    db,
 	}
 
 	go r.RunStorageSaving(r.closeStorageSaving)
@@ -97,24 +128,34 @@ func (r *Storage) Wait() {
 	r.wg.Wait()
 }
 
+func (r *Storage) Stop() {
+	r.closeGarbageCollector <- struct{}{}
+	r.closeStorageSaving <- struct{}{}
+
+	r.GarbageCollect()
+	r.SaveToFile(r.filename)
+
+	r.Wait()
+}
+
 func (r *Storage) GarbageCollect() {
 	defer r.wg.Done()
 
 	r.logger.Info("garbage collection started")
 
 	curTime := time.Now().UnixMilli()
-	expirationKeys := r.getRandomKeysWithExpiration(min(10, len(r.expiration_time)/5))
+	expirationKeys := r.getRandomKeysWithExpiration(min(10, len(r.expirationTime)/5))
 
 	for _, key := range expirationKeys {
-		if expTime, exists := r.expiration_time[key]; exists && expTime != 0 && expTime < curTime {
+		if expTime, exists := r.expirationTime[key]; exists && expTime != 0 && expTime < curTime {
 			r.deleteKey(key)
 		}
 	}
 }
 
 func (r *Storage) getRandomKeysWithExpiration(count int) []string {
-	keys := make([]string, 0, len(r.expiration_time))
-	for key := range r.expiration_time {
+	keys := make([]string, 0, len(r.expirationTime))
+	for key := range r.expirationTime {
 		keys = append(keys, key)
 	}
 
@@ -133,6 +174,8 @@ func (r *Storage) getRandomKeysWithExpiration(count int) []string {
 }
 
 func (r *Storage) deleteKey(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, exists := r.inner[key]; exists {
 		delete(r.inner, key)
 		r.logger.Info("Deleted expired key from inner", zap.String("key", key))
@@ -141,7 +184,7 @@ func (r *Storage) deleteKey(key string) {
 		delete(r.arrays, key)
 		r.logger.Info("Deleted expired key from arrays", zap.String("key", key))
 	}
-	delete(r.expiration_time, key)
+	delete(r.expirationTime, key)
 	r.logger.Info("Deleted expiration entry for key", zap.String("key", key))
 }
 
@@ -153,9 +196,9 @@ func (r *Storage) CheckArrKey(key string) error {
 		return ErrKeyDoesntExist
 	}
 
-	if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
+	if r.expirationTime[key] != 0 && r.expirationTime[key] < curTime {
 		delete(r.arrays, key)
-		delete(r.expiration_time, key)
+		delete(r.expirationTime, key)
 
 		return ErrKeyDoesntExist
 	}
@@ -169,7 +212,12 @@ func (r *Storage) RunStorageSaving(closeChan chan struct{}) {
 			return
 		case <-time.After(r.saveDuration):
 			r.wg.Add(1)
-			r.SaveToFile(r.filename)
+			// r.SaveToFile(r.filename)
+			if err := r.saveToPostgres(r.db); err != nil {
+				r.logger.Error("error storage saving: " + err.Error())
+			} else {
+				r.logger.Info("successful saving storage to posrgres")
+			}
 		}
 	}
 }
@@ -186,14 +234,17 @@ func (r *Storage) Hset(args ...string) error {
 	return nil
 }
 
-func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64) error {
+func (r *Storage) Set(key string, inputVal string, expirationSeconds ...int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	t := int64(0)
-	switch len(expiration_seconds) {
+	switch len(expirationSeconds) {
 	case 1:
-		if expiration_seconds[0] > 0 {
-			t = time.Now().Add(time.Duration(expiration_seconds[0]) * time.Second).UnixMilli()
+		if expirationSeconds[0] > 0 {
+			t = time.Now().Add(time.Duration(expirationSeconds[0]) * time.Second).UnixMilli()
 		}
-		if expiration_seconds[0] < 0 {
+		if expirationSeconds[0] < 0 {
 			return ErrIncorrectArgs
 		}
 	case 0:
@@ -204,30 +255,30 @@ func (r *Storage) Set(key string, input_val string, expiration_seconds ...int64)
 	}
 
 	if _, exists := r.arrays[key]; exists {
-		r.logger.Error("по данному ключу существует значение другого типа")
+		r.logger.Error("по данному ключу существует значение другого типа", zap.String("key", key))
 		return ErrKeyAlreadyExists
 	}
 
-	int_val, err := strconv.Atoi(input_val)
+	intVal, err := strconv.Atoi(inputVal)
 	if err == nil {
 		r.inner[key] = &val{
-			value_type: KindInt,
-			int_value:  int_val,
+			valueType: KindInt,
+			intValue:  intVal,
 		}
-		r.expiration_time[key] = t
+		r.expirationTime[key] = t
 
 		r.logger.Info("key obtained", zap.String("key", key),
-			zap.Int("val", int_val), zap.String("type", string(KindInt)))
+			zap.Int("val", intVal), zap.String("type", string(KindInt)))
 		return nil
 	}
 	r.inner[key] = &val{
-		value_type:   KindString,
-		string_value: input_val,
+		valueType:   KindString,
+		stringValue: inputVal,
 	}
-	r.expiration_time[key] = t
+	r.expirationTime[key] = t
 
 	r.logger.Info("key obtained", zap.String("key", key),
-		zap.String("val", input_val),
+		zap.String("val", inputVal),
 		zap.String("type", string(KindString)))
 	return nil
 }
@@ -241,36 +292,35 @@ func (r *Storage) GetValue(key string) (*val, error) {
 		return nil, ErrKeyDoesntExist
 	}
 
-	if r.expiration_time[key] != 0 && r.expiration_time[key] < curTime {
+	if r.expirationTime[key] != 0 && r.expirationTime[key] < curTime {
 		delete(r.inner, key)
-		delete(r.expiration_time, key)
+		delete(r.expirationTime, key)
 		r.logger.Info("key value doesnt exist", zap.String("key", key))
 		return nil, ErrKeyDoesntExist
 	}
 
-	if val.value_type == KindString {
+	if val.valueType == KindString {
 		r.logger.Info("storage request", zap.String("key", key),
-			zap.String("val", val.string_value), zap.String("type", string(val.value_type)))
+			zap.String("val", val.stringValue), zap.String("type", string(val.valueType)))
 	} else {
 		r.logger.Info("storage request", zap.String("key", key),
-			zap.Int("val", val.int_value), zap.String("type", string(val.value_type)))
+			zap.Int("val", val.intValue), zap.String("type", string(val.valueType)))
 	}
 
 	return val, nil
 }
 
 func (r *Storage) Get(key string) (string, error) {
-	// defer r.logger.Sync()
 
 	val, ok := r.GetValue(key)
 	if ok != nil {
 		return "", ok
 	}
-	switch val.value_type {
+	switch val.valueType {
 	case KindString:
-		return val.string_value, nil
+		return val.stringValue, nil
 	case KindInt:
-		output := strconv.Itoa(val.int_value)
+		output := strconv.Itoa(val.intValue)
 		return output, nil
 	default:
 		return "", nil
@@ -282,12 +332,12 @@ func (r *Storage) GetKind(key string) (kind, error) {
 	if err != nil {
 		return "", err
 	}
-	return val.value_type, err
+	return val.valueType, err
 }
 
 func (r *Storage) Rpush(key string, arr ...int) {
 	if err := r.CheckArrKey(key); err != nil {
-		r.expiration_time[key] = 0
+		r.expirationTime[key] = 0
 	}
 
 	r.arrays[key] = append(r.arrays[key], arr...)
@@ -296,15 +346,15 @@ func (r *Storage) Rpush(key string, arr ...int) {
 		zap.Int("count of elems", len(arr)), zap.String("key", key))
 }
 
-func (r *Storage) Lpush(key string, input_arr ...int) {
+func (r *Storage) Lpush(key string, inputArr ...int) {
 	if err := r.CheckArrKey(key); err != nil {
-		r.expiration_time[key] = 0
+		r.expirationTime[key] = 0
 	}
 
-	r.arrays[key] = append(input_arr, r.arrays[key]...)
+	r.arrays[key] = append(inputArr, r.arrays[key]...)
 
 	r.logger.Info("New elems added to LEFT side of slice",
-		zap.Int("count of elems", len(input_arr)), zap.String("key", key))
+		zap.Int("count of elems", len(inputArr)), zap.String("key", key))
 }
 
 func (r *Storage) Raddtoset(key string, arr ...int) error {
@@ -324,7 +374,7 @@ func (r *Storage) Raddtoset(key string, arr ...int) error {
 		if !exists {
 			_, ex := r.arrays[key]
 			if !ex {
-				r.expiration_time[key] = 0
+				r.expirationTime[key] = 0
 			}
 			r.arrays[key] = append(r.arrays[key], elem)
 		}
@@ -336,13 +386,13 @@ func (r *Storage) Raddtoset(key string, arr ...int) error {
 func (r *Storage) DeleteSegment(key string, l int, ri int) ([]int, error) {
 
 	if err := r.CheckArrKey(key); err != nil {
-		return []int{}, err
+		return nil, err
 	}
 
 	leng := len(r.arrays[key])
 
 	if leng == 0 {
-		return []int{}, nil
+		return nil, nil
 	}
 
 	if ri < 0 {
@@ -353,17 +403,16 @@ func (r *Storage) DeleteSegment(key string, l int, ri int) ([]int, error) {
 
 	if l > ri || l >= leng || ri >= leng {
 		r.logger.Error("invalid indexes")
-		return []int{}, ErrIndexOutOfRange
+		return nil, ErrIndexOutOfRange
 	}
 
-	left_part := r.arrays[key][:l]
-	right_part := r.arrays[key][ri+1:]
+	leftPart := r.arrays[key][:l]
+	rightPart := r.arrays[key][ri+1:]
 
 	deleted := make([]int, ri-l+1)
 	copy(deleted, r.arrays[key][l:ri+1])
-	// fmt.Println(left_part, deleted, right_part)
 
-	r.arrays[key] = append(left_part, right_part...)
+	r.arrays[key] = append(leftPart, rightPart...)
 	r.logger.Info("Some elems has deleted from array",
 		zap.String("key", key), zap.Int("left index", l),
 		zap.Int("right index", ri))
@@ -372,7 +421,7 @@ func (r *Storage) DeleteSegment(key string, l int, ri int) ([]int, error) {
 
 func (r *Storage) Lpop(key string, args ...int) ([]int, error) {
 	if err := r.CheckArrKey(key); err != nil {
-		return []int{}, err
+		return nil, err
 	}
 
 	length := len(r.arrays[key])
@@ -407,13 +456,13 @@ func (r *Storage) Lpop(key string, args ...int) ([]int, error) {
 
 	default:
 		r.logger.Error("Invalid count of arguments, max count is 3")
-		return []int{}, ErrIndexOutOfRange
+		return nil, ErrIndexOutOfRange
 	}
 }
 
 func (r *Storage) Rpop(key string, args ...int) ([]int, error) {
 	if err := r.CheckArrKey(key); err != nil {
-		return []int{}, err
+		return nil, err
 	}
 
 	length := len(r.arrays[key])
@@ -451,11 +500,11 @@ func (r *Storage) Rpop(key string, args ...int) ([]int, error) {
 
 	default:
 		r.logger.Error("Invalid count of arguments, max count is 3")
-		return []int{}, ErrIndexOutOfRange
+		return nil, ErrIndexOutOfRange
 	}
 }
 
-func (r *Storage) Lset(key string, index int, new_val int) error {
+func (r *Storage) Lset(key string, index int, newVal int) error {
 	if _, exists := r.inner[key]; exists {
 		r.logger.Error("по данному ключу существует значение другого типа")
 		return ErrKeyAlreadyExists
@@ -469,9 +518,9 @@ func (r *Storage) Lset(key string, index int, new_val int) error {
 		r.logger.Error(ErrIndexOutOfRange.Error())
 		return ErrIndexOutOfRange
 	}
-	arr[index] = new_val
+	arr[index] = newVal
 	r.logger.Info("element changed", zap.String("key", key),
-		zap.Int("index", index), zap.Int("new val", new_val))
+		zap.Int("index", index), zap.Int("new val", newVal))
 	return nil
 }
 
@@ -497,9 +546,9 @@ func (v *val) MarshalJSON() ([]byte, error) {
 		StringValue string `json:"string_value"`
 		IntValue    int    `json:"int_value"`
 	}{
-		ValueType:   v.value_type,
-		StringValue: v.string_value,
-		IntValue:    v.int_value,
+		ValueType:   v.valueType,
+		StringValue: v.stringValue,
+		IntValue:    v.intValue,
 	})
 }
 
@@ -513,30 +562,30 @@ func (v *val) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	v.value_type = aux.ValueType
-	v.string_value = aux.StringValue
-	v.int_value = aux.IntValue
+	v.valueType = aux.ValueType
+	v.stringValue = aux.StringValue
+	v.intValue = aux.IntValue
 
 	return nil
 }
 
 func (r *Storage) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		Inner           map[string]*val  `json:"inner"`
-		Arrays          map[string][]int `json:"arrays"`
-		Expiration_time map[string]int64
+		Inner          map[string]*val  `json:"inner"`
+		Arrays         map[string][]int `json:"arrays"`
+		ExpirationTime map[string]int64
 	}{
-		Inner:           r.inner,
-		Arrays:          r.arrays,
-		Expiration_time: r.expiration_time,
+		Inner:          r.inner,
+		Arrays:         r.arrays,
+		ExpirationTime: r.expirationTime,
 	})
 }
 
 func (r *Storage) UnmarshalJSON(data []byte) error {
 	aux := &struct {
-		Inner           map[string]*val  `json:"inner"`
-		Arrays          map[string][]int `json:"arrays"`
-		Expiration_time map[string]int64
+		Inner          map[string]*val  `json:"inner"`
+		Arrays         map[string][]int `json:"arrays"`
+		ExpirationTime map[string]int64
 	}{}
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
@@ -544,7 +593,7 @@ func (r *Storage) UnmarshalJSON(data []byte) error {
 
 	r.inner = aux.Inner
 	r.arrays = aux.Arrays
-	r.expiration_time = aux.Expiration_time
+	r.expirationTime = aux.ExpirationTime
 	r.logger, _ = zap.NewProduction()
 	return nil
 }
@@ -555,7 +604,7 @@ func (r *Storage) SaveToFile(filename string) error {
 
 	data, err := json.Marshal(r)
 	if err != nil {
-		fmt.Println("error marshalling storage: ", err)
+		r.logger.Error("error marshalling storage: ", zap.String("filename", r.filename))
 		return fmt.Errorf("error marshalling storage: %v", err)
 	}
 
@@ -590,27 +639,71 @@ func (r *Storage) LoadFromFile(filename string) error {
 func (r *Storage) Expire(key string, ex int64) bool {
 	currentTime := time.Now().UnixMilli()
 	if _, exists := r.inner[key]; exists &&
-		(r.expiration_time[key] == 0 ||
-			r.expiration_time[key] > currentTime) {
+		(r.expirationTime[key] == 0 ||
+			r.expirationTime[key] > currentTime) {
 
 		if ex != 0 {
-			r.expiration_time[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
+			r.expirationTime[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
 		} else {
-			r.expiration_time[key] = 0
+			r.expirationTime[key] = 0
 		}
 		return true
 	}
 
 	if _, exists := r.arrays[key]; exists &&
-		(r.expiration_time[key] == 0 ||
-			r.expiration_time[key] > currentTime) {
+		(r.expirationTime[key] == 0 ||
+			r.expirationTime[key] > currentTime) {
 
 		if ex != 0 {
-			r.expiration_time[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
+			r.expirationTime[key] = time.Now().Add(time.Duration(ex) * time.Second).UnixMilli()
 		} else {
-			r.expiration_time[key] = 0
+			r.expirationTime[key] = 0
 		}
 	}
 
 	return false
+}
+
+func (r *Storage) saveToPostgres(db *sql.DB) error {
+	// Преобразуем `state` в JSON
+	payload, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+
+	timestamp := time.Now().Unix()
+
+	_, err = db.Exec(`INSERT INTO core (timestamp, payload) VALUES ($1, $2)`, timestamp, payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`DELETE FROM core WHERE version NOT IN (SELECT version FROM core ORDER BY version DESC LIMIT 5)`)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Storage) LoadFromPostgres() error {
+	row := r.db.QueryRow(`SELECT payload FROM core ORDER BY version DESC LIMIT 1`)
+
+	var payload []byte
+	err := row.Scan(&payload)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			r.logger.Info("Записей в базе данных не найдено, загружается пустое состояние.")
+			return nil
+		}
+		return fmt.Errorf("ошибка при чтении последней версии состояния из базы данных: %v", err)
+	}
+
+	err = json.Unmarshal(payload, r)
+	if err != nil {
+		return fmt.Errorf("ошибка при декодировании JSON состояния: %v", err)
+	}
+
+	r.logger.Info("Состояние загружено из базы данных PostgreSQL")
+	return nil
 }

@@ -51,7 +51,7 @@
 1. Убедитесь, что у вас установлен Go (версия >= 1.18) и PostgreSQL.
 2. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/chrizantona/go-course-2024.git
+   git clone https://github.com/rougenn/go-course-2024.git
    cd go-course-2024
    ```
 3. Установите зависимости и запустите приложение:
@@ -80,7 +80,7 @@
 **SET key value [EX seconds]**
 
 ```bash
-curl -X POST http://localhost:8080/set -d 'key=name&value="Alan"&ex=20'
+curl -X POST http://localhost:8080/set -d 'key=name&value="test123"&ex=20'
 ```
 
 Ответ:
@@ -98,21 +98,7 @@ curl -X GET http://localhost:8080/get?key=name
 Ответ:
 
 ```json
-"Alan"
-```
-
-#### Работа со словарями
-
-**HSET key field value**
-
-```bash
-curl -X POST http://localhost:8080/hash/set -d 'key=user&field=name&value="Alan"'
-```
-
-Ответ:
-
-```json
-{"fields_affected":1}
+"test123"
 ```
 
 **HGET key field**
@@ -124,7 +110,7 @@ curl -X GET http://localhost:8080/hash/get?key=user&field=name
 Ответ:
 
 ```json
-"Alan"
+"test123"
 ```
 
 #### Работа с массивами
@@ -182,15 +168,6 @@ go test ./...
 ```bash
 go test -bench=.
 ```
-
----
-
-## Контакты
-
-Если у вас есть вопросы или предложения, вы можете связаться со мной:
-
-- Email: [sharukondondon@gmail.com](mailto\:sharukondondon@gmail.com)
-- GitHub: [chrizantona](https://github.com/chrizantona)
 
 ---
 
